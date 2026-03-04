@@ -1,0 +1,23 @@
+{
+  "skill_name": "command-doc-validator",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我有个 Python 数据处理脚本 process_data.py，需要传入输入文件路径和输出目录，还要设置 UTF-8 编码避免中文乱码。帮我写个运行文档，让 AI 能稳定执行这个脚本。脚本参数：--input（输入文件）、--output（输出目录）、--format（输出格式，默认 csv）",
+      "expected_output": "生成一个简洁的运行文档，包含正确的命令格式、参数说明、环境变量设置，并明确说明 Claude Code 使用 bash 语法",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "我写了个 npm 脚本要在项目里运行测试，命令是 npm run test -- --coverage --watch=false，但是每次让 AI 执行都失败，要么忘记设置工作目录，要么用错了参数格式。能帮我写个靠谱的运行文档吗？项目路径在 ~/projects/my-app",
+      "expected_output": "生成一个运行文档，明确工作目录切换、命令格式、参数说明，避免常见错误",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "验证一下这个运行文档是否准确：我写了个 Agent 运行指南，但不确定新的 AI 看了之后能不能一次执行成功。文档路径：C:\\Users\\zs\\Documents\\code\\pycode\\Indicator_Analytics\\specs\\经验\\Agent命令行运行指南.md",
+      "expected_output": "启动子 Agent 测试文档，统计尝试次数，如果 > 1 次则提出改进建议",
+      "files": []
+    }
+  ]
+}
