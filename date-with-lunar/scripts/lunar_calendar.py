@@ -68,7 +68,7 @@ BASE_DATE = datetime(1900, 1, 31)
 
 def get_leap_month(year):
     """Get the leap month of a lunar year (0-12, 0 means no leap month)"""
-    return (LUNAR_INFO[year - 1900] >> 16) & 0x0F
+    return LUNAR_INFO[year - 1900] & 0x0F
 
 
 def get_lunar_month_days(year, month):
@@ -116,24 +116,24 @@ def solar_to_lunar(solar_date):
     # Find lunar month and day
     leap_month = get_leap_month(lunar_year)
     is_leap = False
+    lunar_month = 1
 
-    for lunar_month in range(1, 13):
-        # Check if this is a leap month
-        if leap_month > 0 and lunar_month == (leap_month + 1) and not is_leap:
-            # This is the leap month
-            is_leap = True
-            lunar_month -= 1
-            temp = get_leap_month_days(lunar_year)
-        else:
-            temp = get_lunar_month_days(lunar_year, lunar_month)
-
+    while lunar_month <= 12:
+        # Process regular month
+        temp = get_lunar_month_days(lunar_year, lunar_month)
         if offset < temp:
             break
-
         offset -= temp
 
-        if is_leap and lunar_month == leap_month:
-            is_leap = False
+        # Check if there's a leap month after this month
+        if leap_month > 0 and lunar_month == leap_month:
+            temp = get_leap_month_days(lunar_year)
+            if offset < temp:
+                is_leap = True
+                break
+            offset -= temp
+
+        lunar_month += 1
 
     lunar_day = offset + 1
 
