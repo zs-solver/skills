@@ -16,6 +16,7 @@ description: |
 ### 2. 查看文档
 - 读取 `CLAUDE.md` 或 `README.md`
 - 读取 `specs/通用规则.md`
+- 读取 requirement.md 的 `## 相关文档与资源`，根据关系描述判断哪些需要读取（不必全读）
 - 读取 `docs/` 中相关文档
 
 ### 3. 查看代码
