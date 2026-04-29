@@ -8,10 +8,12 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from posixpath import dirname as _posix_dirname
 
 _HR = re.compile(r"^\s*(?:-{3,}|\*{3,}|_{3,})\s*$")
 _YAML_KEY = re.compile(r"^[\w.-]+\s*:\s")
 _SEP_CELL = re.compile(r"^[\-:\s]+$")
+_WIKILINK = re.compile(r"\[\[([^\]|#]+)([|#][^\]]*)?\]\]")
 
 
 def _fm_span(lines: list[str]) -> tuple[int, int] | None:
@@ -28,6 +30,28 @@ def _fm_span(lines: list[str]) -> tuple[int, int] | None:
     return None
 
 
+def _wikilink_norm(s: str, file_dir: str) -> str:
+    """[[dir/name.md]] → [[name]] when dir ends with file's own directory; .md suffix is ignored."""
+    def _strip_md(target: str) -> str:
+        return target[:-3] if target.lower().endswith(".md") else target
+
+    fd = file_dir.rstrip("/")
+
+    def _repl(m: re.Match) -> str:
+        target = m.group(1)
+        suffix = m.group(2) or ""
+        slash = target.rfind("/")
+        if slash < 0:
+            return "[[" + _strip_md(target) + suffix + "]]"
+        target_dir = target[:slash]
+        target_name = _strip_md(target[slash + 1:])
+        if fd and (target_dir == fd or target_dir.endswith("/" + fd)):
+            return "[[" + target_name + suffix + "]]"
+        return "[[" + _strip_md(target) + suffix + "]]"
+
+    return _WIKILINK.sub(_repl, s)
+
+
 def _table_row_norm(s: str) -> str:
     if not re.match(r"^\s*\|", s):
         return s
@@ -40,18 +64,19 @@ def _table_row_norm(s: str) -> str:
     return "| " + " | ".join(norm) + " |"
 
 
-def normalize_body_fragment(lines: list[str]) -> str:
+def normalize_body_fragment(lines: list[str], file_dir: str = "") -> str:
     """与 normalize() 中非 frontmatter 行相同的归一规则（用于判断 raw 片段是否仅噪声）。"""
     acc: list[str] = []
     for raw in lines:
         s = raw.rstrip("\n\r").rstrip()
         if not s.strip() or _HR.match(s):
             continue
+        s = _wikilink_norm(s, file_dir)
         acc.append(_table_row_norm(s))
     return "\n".join(acc)
 
 
-def normalize(text: str) -> str:
+def normalize(text: str, file_dir: str = "") -> str:
     lines = text.splitlines()
     fm = _fm_span(lines)
     acc: list[str] = []
@@ -62,6 +87,7 @@ def normalize(text: str) -> str:
             continue
         if not s.strip() or _HR.match(s):
             continue
+        s = _wikilink_norm(s, file_dir)
         acc.append(_table_row_norm(s))
     return "\n".join(acc)
 
@@ -84,7 +110,7 @@ def show(repo: Path, spec: str) -> str | None:
 _MAX_UNIFIED_DIFF_LINES = 120
 
 
-def _summarize_table_alignment_noise(raw_old: str, raw_new: str) -> str | None:
+def _summarize_table_alignment_noise(raw_old: str, raw_new: str, file_dir: str = "") -> str | None:
     """行级 SequenceMatcher：归一化后一致的 replace 块视为表格对齐/空白/横线类 raw 噪声，只统计不打印原文。"""
     a = raw_old.splitlines()
     b = raw_new.splitlines()
@@ -97,13 +123,13 @@ def _summarize_table_alignment_noise(raw_old: str, raw_new: str) -> str | None:
         seg_a, seg_b = a[i1:i2], b[j1:j2]
         if not seg_a and not seg_b:
             continue
-        if normalize_body_fragment(seg_a) == normalize_body_fragment(seg_b):
+        if normalize_body_fragment(seg_a, file_dir) == normalize_body_fragment(seg_b, file_dir):
             blocks += 1
             raw_line_slots += max(len(seg_a), len(seg_b))
     if blocks == 0:
         return None
     return (
-        f"另有 {blocks} 段 raw 差异在「空白/横线/管道表格列对齐」归一化后与基准一致（约 {raw_line_slots} 行），"
+        f"另有 {blocks} 段 raw 差异在「空白/横线/管道表格列对齐/wikilink 路径展开」归一化后与基准一致（约 {raw_line_slots} 行），"
         "不展开具体表格或对齐内容"
     )
 
@@ -139,6 +165,7 @@ def _report(
     raw_new: str,
     *,
     brief: bool,
+    file_dir: str = "",
     diff_from: str | None = None,
     diff_to: str | None = None,
 ) -> None:
@@ -146,7 +173,7 @@ def _report(
         st, det = (
             ("仅噪声", "与基准完全一致（含空白与格式）")
             if raw_old == raw_new
-            else ("仅噪声", "剥离空白、横线与表格对齐后一致，无实质修改")
+            else ("仅噪声", "剥离空白、横线、表格对齐与 wikilink 路径展开后一致，无实质修改")
         )
     else:
         st, det = ("有实质差异", "剥离噪声后仍有差异（存在实质修改）")
@@ -155,12 +182,12 @@ def _report(
     if ok or brief:
         return
 
-    norm_o, norm_n = normalize(raw_old), normalize(raw_new)
-    print("  判定思路：全文先做空白/横线剔除与管道表单元格 strip 归一化（frontmatter 行原样保留），比较归一化文本；")
+    norm_o, norm_n = normalize(raw_old, file_dir), normalize(raw_new, file_dir)
+    print("  判定思路：全文先做空白/横线剔除、管道表单元格 strip、wikilink 同目录路径展开归一化（frontmatter 行原样保留），比较归一化文本；")
     print("            若仍不同，则输出归一化后的 unified diff 作为实质差异。另用行级 diff 找出「片段归一化后一致」的 replace 块，")
-    print("            归为表格对齐类 raw 噪声，仅计数说明、不打印具体表格。")
+    print("            归为表格对齐/wikilink 展开类 raw 噪声，仅计数说明、不打印具体内容。")
 
-    noise_hint = _summarize_table_alignment_noise(raw_old, raw_new)
+    noise_hint = _summarize_table_alignment_noise(raw_old, raw_new, file_dir)
     if noise_hint:
         print(f"  {noise_hint}")
 
@@ -213,6 +240,7 @@ def main() -> int:
             o,
             n,
             brief=args.brief,
+            file_dir="",
             diff_from=pa.name,
             diff_to=pb.name,
         )
@@ -251,10 +279,11 @@ def main() -> int:
             fp = repo / rel
             n = fp.read_text(encoding="utf-8", errors="replace") if fp.is_file() else ""
 
-        ok = normalize(o) == normalize(n)
+        fdir = _posix_dirname(rel)
+        ok = normalize(o, fdir) == normalize(n, fdir)
         if not ok:
             bad = True
-        _report(rel, ok, o, n, brief=args.brief)
+        _report(rel, ok, o, n, brief=args.brief, file_dir=fdir)
         if i < len(paths) - 1:
             print()
     return 1 if bad else 0
